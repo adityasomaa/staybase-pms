@@ -4,11 +4,16 @@ import {
   BrushCleaning,
   CalendarRange,
   ChartNoAxesCombined,
+  CircleHelp,
   ConciergeBell,
+  CreditCard,
   LayoutDashboard,
   Plug,
   Settings,
+  SlidersHorizontal,
   SquareStack,
+  Table2,
+  UserCog,
   Users,
 } from "lucide-react";
 
@@ -17,7 +22,7 @@ export interface NavItem {
   href: string;
   icon: LucideIcon;
   description: string;
-  badgeKey?: "arrivals" | "syncErrors" | "dirtyRooms";
+  badgeKey?: "arrivals" | "syncErrors" | "dirtyRooms" | "blocks" | "unpaidInvoices";
 }
 
 export interface NavSection {
@@ -38,7 +43,7 @@ export const navigation: NavSection[] = [
       {
         title: "Rates & Availability",
         href: "/calendar",
-        icon: CalendarRange,
+        icon: Table2,
         description: "Edit the ARI grid and push it to every channel",
       },
     ],
@@ -46,6 +51,13 @@ export const navigation: NavSection[] = [
   {
     label: "Operations",
     items: [
+      {
+        title: "Booking Calendar",
+        href: "/planner",
+        icon: CalendarRange,
+        description: "Room-by-room timeline, stay details and maintenance blocks",
+        badgeKey: "blocks",
+      },
       {
         title: "Reservations",
         href: "/reservations",
@@ -88,7 +100,13 @@ export const navigation: NavSection[] = [
         title: "Inventory",
         href: "/inventory",
         icon: BedDouble,
-        description: "Room types, rate plans and derived pricing",
+        description: "Room types, rooms, rate plans and derived pricing",
+      },
+      {
+        title: "Dynamic Pricing",
+        href: "/pricing",
+        icon: SlidersHorizontal,
+        description: "Rules, guardrails and suggested rates for the next 30 days",
       },
       {
         title: "Reports",
@@ -99,8 +117,27 @@ export const navigation: NavSection[] = [
     ],
   },
   {
-    label: "Configuration",
+    label: "Workspace",
     items: [
+      {
+        title: "Users",
+        href: "/users",
+        icon: UserCog,
+        description: "Invite teammates, set roles and assign properties",
+      },
+      {
+        title: "Billing",
+        href: "/billing",
+        icon: CreditCard,
+        description: "Subscription, invoices and payment method",
+        badgeKey: "unpaidInvoices",
+      },
+      {
+        title: "Help & Tutorials",
+        href: "/help",
+        icon: CircleHelp,
+        description: "Guides for rates, channels, pricing, billing and access",
+      },
       {
         title: "Settings",
         href: "/settings",

@@ -198,3 +198,236 @@ export interface KpiPoint {
   revenue: number;
   bookings: number;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Room blocks                                                               */
+/* -------------------------------------------------------------------------- */
+
+export type BlockReason =
+  | "maintenance"
+  | "renovation"
+  | "deep_clean"
+  | "owner_use"
+  | "quarantine";
+
+export interface RoomBlock {
+  id: string;
+  propertyId: string;
+  roomId: string;
+  roomNumber: string;
+  roomTypeId: string;
+  /** Inclusive start, exclusive end — same convention as a stay. */
+  from: ISODate;
+  to: ISODate;
+  reason: BlockReason;
+  note?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Users & access                                                            */
+/* -------------------------------------------------------------------------- */
+
+export type UserRole =
+  | "owner"
+  | "manager"
+  | "revenue_manager"
+  | "front_desk"
+  | "housekeeping"
+  | "accountant";
+
+export type UserStatus = "active" | "invited" | "suspended";
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  status: UserStatus;
+  /** Property ids this user can see. Owners implicitly see everything. */
+  propertyIds: string[];
+  lastActiveAt: string | null;
+  invitedAt: string;
+  avatarHue: number;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Billing & subscription                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type SubscriptionStatus = "active" | "past_due" | "suspended" | "trialing";
+
+export type PlanId = "starter" | "growth" | "scale";
+
+export interface Plan {
+  id: PlanId;
+  name: string;
+  /** Price per room per month. */
+  pricePerRoom: number;
+  minimumMonthly: number;
+  includedProperties: number;
+  features: string[];
+}
+
+export interface Subscription {
+  planId: PlanId;
+  status: SubscriptionStatus;
+  billableRooms: number;
+  properties: number;
+  currentPeriodStart: ISODate;
+  currentPeriodEnd: ISODate;
+  /** Days after the due date before the workspace is locked. */
+  graceDays: number;
+  paymentMethod: { brand: string; last4: string; expiry: string } | null;
+}
+
+export type InvoiceStatus = "paid" | "open" | "past_due" | "void";
+
+export interface InvoiceLine {
+  description: string;
+  quantity: number;
+  unitAmount: number;
+  amount: number;
+}
+
+export interface Invoice {
+  id: string;
+  number: string;
+  periodStart: ISODate;
+  periodEnd: ISODate;
+  issuedAt: ISODate;
+  dueAt: ISODate;
+  status: InvoiceStatus;
+  currency: Currency;
+  lines: InvoiceLine[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  paidAt: ISODate | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Dynamic pricing                                                           */
+/* -------------------------------------------------------------------------- */
+
+export type PricingRuleKind =
+  | "occupancy"
+  | "lead_time"
+  | "day_of_week"
+  | "orphan_gap"
+  | "length_of_stay"
+  | "competitor";
+
+export type PricingAdjustment =
+  | { type: "percent"; value: number }
+  | { type: "amount"; value: number }
+  | { type: "target"; value: number };
+
+export interface PricingRule {
+  id: string;
+  name: string;
+  kind: PricingRuleKind;
+  enabled: boolean;
+  /** Lower runs first; later rules compound on the result. */
+  priority: number;
+  /** Restrict to specific room types; empty means all. */
+  roomTypeIds: string[];
+  description: string;
+  condition:
+    | { kind: "occupancy"; minOccupancy: number; maxOccupancy: number }
+    | { kind: "lead_time"; minDays: number; maxDays: number }
+    | { kind: "day_of_week"; days: number[] }
+    | { kind: "orphan_gap"; maxGapNights: number }
+    | { kind: "length_of_stay"; minNights: number }
+    | { kind: "competitor"; direction: "below" | "above" };
+  adjustment: PricingAdjustment;
+}
+
+export interface PricingGuardrail {
+  roomTypeId: string;
+  floor: number;
+  ceiling: number;
+  maxDailyMovePct: number;
+}
+
+export interface PriceSuggestion {
+  date: ISODate;
+  roomTypeId: string;
+  ratePlanId: string;
+  currentRate: number;
+  suggestedRate: number;
+  deltaPct: number;
+  occupancy: number;
+  leadDays: number;
+  appliedRules: { id: string; name: string; effect: number }[];
+  clampedBy: "floor" | "ceiling" | "daily_move" | null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  OTA catalogue & help                                                      */
+/* -------------------------------------------------------------------------- */
+
+export interface OtaDefinition {
+  /** Slug used in the connect URL. */
+  slug: string;
+  name: string;
+  /** Channex channel identifier. */
+  channexChannel: string;
+  category: "ota" | "metasearch" | "direct" | "wholesaler";
+  commissionRange: [number, number];
+  /** Model the channel uses for rates. */
+  rateModel: "per_room" | "per_person" | "both";
+  regions: string[];
+  summary: string;
+  /** What the hotel must obtain before mapping can start. */
+  credentials: { label: string; hint: string; secret: boolean }[];
+  steps: { title: string; detail: string }[];
+  pitfalls: string[];
+  docsUrl: string;
+  averageSetupDays: number;
+}
+
+export type HelpCategory =
+  | "getting_started"
+  | "rates"
+  | "reservations"
+  | "channels"
+  | "billing"
+  | "users"
+  | "pricing";
+
+export interface HelpArticle {
+  slug: string;
+  title: string;
+  category: HelpCategory;
+  summary: string;
+  minutes: number;
+  keywords: string[];
+  body: { heading: string; paragraphs: string[]; steps?: string[] }[];
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Search                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export type SearchKind =
+  | "reservation"
+  | "guest"
+  | "room"
+  | "rate_plan"
+  | "channel"
+  | "page"
+  | "article"
+  | "action";
+
+export interface SearchResult {
+  id: string;
+  kind: SearchKind;
+  title: string;
+  subtitle: string;
+  href: string;
+  /** Higher wins. */
+  score: number;
+  badge?: string;
+}

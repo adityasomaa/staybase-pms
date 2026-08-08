@@ -1,12 +1,26 @@
 import "server-only";
 
 import { addDays, diffDays, eachDay } from "@/lib/date";
+import { helpArticles, helpCategoryLabels } from "@/lib/help/articles";
+import { allNavItems } from "@/lib/navigation";
+import { otaCatalog } from "@/lib/ota/catalog";
+import { suggestPrice } from "@/lib/pricing";
 import type {
   AriCell,
+  BlockReason,
   ChannelCode,
   ISODate,
+  Invoice,
+  Plan,
+  PriceSuggestion,
+  PricingRule,
+  RatePlan,
   Reservation,
   ReservationStatus,
+  RoomBlock,
+  RoomType,
+  SearchResult,
+  Subscription,
 } from "@/lib/types";
 import {
   ariCells,
@@ -21,6 +35,15 @@ import {
   syncEvents,
   TODAY,
 } from "@/lib/data/seed";
+import {
+  invoices,
+  plans,
+  pricingGuardrails,
+  pricingRules,
+  roomBlocks,
+  subscription,
+  users,
+} from "@/lib/data/seed-ops";
 
 export {
   TODAY,
@@ -32,6 +55,11 @@ export {
   channelConnections,
   syncEvents,
   kpiSeries,
+  users,
+  invoices,
+  plans,
+  subscription,
+  roomBlocks,
 };
 
 export const activeProperty = properties[0];
@@ -381,4 +409,617 @@ export function getRecentReservations(limit = 8): Reservation[] {
   return [...reservations]
     .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1))
     .slice(0, limit);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Booking calendar (room-by-room timeline)                                  */
+/* -------------------------------------------------------------------------- */
+
+export interface PlannerStay {
+  reservationId: string;
+  reference: string;
+  guestName: string;
+  channel: ChannelCode;
+  status: ReservationStatus;
+  paymentStatus: string;
+  checkIn: ISODate;
+  checkOut: ISODate;
+  nights: number;
+  adults: number;
+  children: number;
+  total: number;
+  balance: number;
+  ratePlanTitle: string;
+  specialRequests?: string;
+  /** Column index within the rendered window, and how many columns it spans. */
+  offset: number;
+  span: number;
+  /** True when the stay starts before the window does. */
+  clippedStart: boolean;
+  clippedEnd: boolean;
+}
+
+export interface PlannerBlock {
+  id: string;
+  reason: BlockReason;
+  note?: string;
+  from: ISODate;
+  to: ISODate;
+  createdBy: string;
+  offset: number;
+  span: number;
+}
+
+export interface PlannerRow {
+  roomId: string;
+  roomNumber: string;
+  floor: number;
+  roomTypeId: string;
+  roomTypeTitle: string;
+  housekeeping: string;
+  stays: PlannerStay[];
+  blocks: PlannerBlock[];
+}
+
+const PLANNER_STATUSES: ReservationStatus[] = ["confirmed", "tentative", "in_house", "checked_out"];
+
+/**
+ * Builds the room-by-room timeline.
+ *
+ * Stays are clipped to the visible window and carry their column offset and
+ * span, so the client renders bars by grid position instead of recomputing
+ * date maths for every cell.
+ */
+export function getPlannerGrid(from: ISODate, days: number): {
+  dates: ISODate[];
+  rows: PlannerRow[];
+  unassigned: PlannerStay[];
+} {
+  const dates = eachDay(from, days);
+  const windowEnd = addDays(from, days);
+
+  const clip = (start: ISODate, end: ISODate) => {
+    const offset = Math.max(0, diffDays(from, start));
+    const endIndex = Math.min(days, diffDays(from, end));
+    return {
+      offset,
+      span: Math.max(1, endIndex - offset),
+      clippedStart: start < from,
+      clippedEnd: end > windowEnd,
+    };
+  };
+
+  const toStay = (reservation: Reservation): PlannerStay => {
+    const room = reservation.rooms[0];
+    const geometry = clip(reservation.checkIn, reservation.checkOut);
+    return {
+      reservationId: reservation.id,
+      reference: reservation.reference,
+      guestName: getGuest(reservation.guestId)?.name ?? "Unknown guest",
+      channel: reservation.channel,
+      status: reservation.status,
+      paymentStatus: reservation.paymentStatus,
+      checkIn: reservation.checkIn,
+      checkOut: reservation.checkOut,
+      nights: reservation.nights,
+      adults: room.adults,
+      children: room.children,
+      total: reservation.total,
+      balance: reservation.balance,
+      ratePlanTitle: getRatePlan(room.ratePlanId)?.title ?? "—",
+      specialRequests: reservation.specialRequests,
+      ...geometry,
+    };
+  };
+
+  const inWindow = reservations.filter(
+    (r) =>
+      PLANNER_STATUSES.includes(r.status) &&
+      r.checkIn < windowEnd &&
+      r.checkOut > from,
+  );
+
+  const byRoomNumber = new Map<string, Reservation[]>();
+  const unassigned: PlannerStay[] = [];
+  for (const reservation of inWindow) {
+    const number = reservation.rooms[0]?.roomNumber;
+    if (!number) {
+      unassigned.push(toStay(reservation));
+      continue;
+    }
+    const list = byRoomNumber.get(number) ?? [];
+    list.push(reservation);
+    byRoomNumber.set(number, list);
+  }
+
+  const blocksByRoom = new Map<string, RoomBlock[]>();
+  for (const block of roomBlocks) {
+    if (block.from >= windowEnd || block.to <= from) continue;
+    const list = blocksByRoom.get(block.roomId) ?? [];
+    list.push(block);
+    blocksByRoom.set(block.roomId, list);
+  }
+
+  const rows: PlannerRow[] = rooms
+    .map((room) => ({
+      roomId: room.id,
+      roomNumber: room.number,
+      floor: room.floor,
+      roomTypeId: room.roomTypeId,
+      roomTypeTitle: getRoomType(room.roomTypeId)?.title ?? "—",
+      housekeeping: room.housekeeping,
+      stays: (byRoomNumber.get(room.number) ?? [])
+        .map(toStay)
+        .sort((a, b) => a.offset - b.offset),
+      blocks: (blocksByRoom.get(room.id) ?? []).map((block) => {
+        const geometry = clip(block.from, block.to);
+        return {
+          id: block.id,
+          reason: block.reason,
+          note: block.note,
+          from: block.from,
+          to: block.to,
+          createdBy: block.createdBy,
+          offset: geometry.offset,
+          span: geometry.span,
+        };
+      }),
+    }))
+    .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber));
+
+  return { dates, rows, unassigned: unassigned.sort((a, b) => a.offset - b.offset) };
+}
+
+export function listRoomBlocks() {
+  return [...roomBlocks].sort((a, b) => (a.from < b.from ? -1 : 1));
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Users                                                                     */
+/* -------------------------------------------------------------------------- */
+
+export function listUsers() {
+  const order: Record<string, number> = { active: 0, invited: 1, suspended: 2 };
+  return [...users].sort(
+    (a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name),
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Billing                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export interface BillingOverview {
+  subscription: Subscription;
+  plan: Plan;
+  plans: Plan[];
+  invoices: Invoice[];
+  outstanding: Invoice[];
+  amountDue: number;
+  /** Negative once the grace period has expired. */
+  daysUntilSuspension: number | null;
+  nextInvoiceEstimate: number;
+}
+
+export function getBillingOverview(): BillingOverview {
+  const plan = plans.find((p) => p.id === subscription.planId)!;
+  const outstanding = invoices.filter(
+    (invoice) => invoice.status === "open" || invoice.status === "past_due",
+  );
+  const oldestDue = outstanding
+    .map((invoice) => invoice.dueAt)
+    .sort()
+    .at(0);
+
+  const roomsAmount = Math.max(
+    plan.minimumMonthly,
+    subscription.billableRooms * plan.pricePerRoom,
+  );
+
+  return {
+    subscription,
+    plan,
+    plans,
+    invoices: [...invoices].sort((a, b) => (a.issuedAt > b.issuedAt ? -1 : 1)),
+    outstanding,
+    amountDue: outstanding.reduce((sum, invoice) => sum + invoice.total, 0),
+    daysUntilSuspension: oldestDue
+      ? diffDays(TODAY, addDays(oldestDue, subscription.graceDays))
+      : null,
+    nextInvoiceEstimate: Math.round(roomsAmount * 1.11),
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Dynamic pricing                                                           */
+/* -------------------------------------------------------------------------- */
+
+export { pricingRules, pricingGuardrails };
+
+/** Occupancy per room type per date, from the ARI grid. */
+function occupancyFor(roomTypeId: string, date: ISODate): number {
+  const cell = ariCells.find((c) => c.roomTypeId === roomTypeId && c.date === date);
+  if (!cell || cell.allotment === 0) return 0;
+  return Math.min(1, cell.booked / cell.allotment);
+}
+
+/**
+ * The raw inputs the rule engine needs, one per (room type, date).
+ *
+ * Sent to the browser so toggling a rule re-prices instantly. The engine is a
+ * pure function with no server dependencies, so it runs identically on both
+ * sides and there is no second implementation to drift.
+ */
+export function getPricingInputs(days = 30) {
+  const dates = eachDay(TODAY, days);
+  const primaryPlans = roomTypes
+    .filter((rt) => rt.propertyId === activeProperty.id)
+    .map((rt) => ({
+      roomType: rt,
+      plan: ratePlans.find((rp) => rp.roomTypeId === rt.id && rp.mode === "manual"),
+    }))
+    .filter((entry): entry is { roomType: RoomType; plan: RatePlan } => Boolean(entry.plan));
+
+  const inputs = [];
+  for (const { roomType, plan } of primaryPlans) {
+    for (const date of dates) {
+      const cell = ariCells.find((c) => c.ratePlanId === plan.id && c.date === date);
+      if (!cell) continue;
+      inputs.push({
+        date,
+        roomTypeId: roomType.id,
+        roomTypeTitle: roomType.title,
+        ratePlanId: plan.id,
+        currentRate: cell.rate,
+        occupancy: occupancyFor(roomType.id, date),
+        gapNights: orphanGapNights(roomType.id, date),
+        competitorRate: Math.round((roomType.defaultRate * 1.12) / 50_000) * 50_000,
+        roomsFree: Math.max(0, cell.allotment - cell.booked),
+      });
+    }
+  }
+  return { dates, inputs };
+}
+
+/**
+ * Runs the rule stack over the primary rate plan of every room type for the
+ * next N days. Only the primary plan is priced — derived plans follow their
+ * parent by construction, so pricing them separately would double-apply.
+ */
+export function getPricingPreview(days = 30, rules: PricingRule[] = pricingRules) {
+  const dates = eachDay(TODAY, days);
+  const primaryPlans = roomTypes
+    .filter((rt) => rt.propertyId === activeProperty.id)
+    .map((rt) => ({
+      roomType: rt,
+      plan: ratePlans.find((rp) => rp.roomTypeId === rt.id && rp.mode === "manual"),
+    }))
+    .filter((entry): entry is { roomType: RoomType; plan: RatePlan } => Boolean(entry.plan));
+
+  const suggestions: PriceSuggestion[] = [];
+  for (const { roomType, plan } of primaryPlans) {
+    const guardrail = pricingGuardrails.find((g) => g.roomTypeId === roomType.id);
+    for (const date of dates) {
+      const cell = ariCells.find((c) => c.ratePlanId === plan.id && c.date === date);
+      if (!cell) continue;
+      const occupancy = occupancyFor(roomType.id, date);
+      suggestions.push(
+        suggestPrice(
+          {
+            date,
+            roomTypeId: roomType.id,
+            ratePlanId: plan.id,
+            currentRate: cell.rate,
+            occupancy,
+            gapNights: orphanGapNights(roomType.id, date),
+            competitorRate: Math.round((roomType.defaultRate * 1.12) / 50_000) * 50_000,
+          },
+          rules,
+          guardrail,
+          TODAY,
+        ),
+      );
+    }
+  }
+
+  const changed = suggestions.filter((s) => s.suggestedRate !== s.currentRate);
+  const uplift = suggestions.reduce((sum, s) => {
+    const cell = ariCells.find(
+      (c) => c.ratePlanId === s.ratePlanId && c.date === s.date,
+    );
+    const free = cell ? Math.max(0, cell.allotment - cell.booked) : 0;
+    return sum + (s.suggestedRate - s.currentRate) * free;
+  }, 0);
+
+  return {
+    dates,
+    suggestions,
+    changed: changed.length,
+    total: suggestions.length,
+    projectedUplift: uplift,
+    byDate: dates.map((date) => {
+      const day = suggestions.filter((s) => s.date === date);
+      const avgCurrent = day.length
+        ? day.reduce((sum, s) => sum + s.currentRate, 0) / day.length
+        : 0;
+      const avgSuggested = day.length
+        ? day.reduce((sum, s) => sum + s.suggestedRate, 0) / day.length
+        : 0;
+      return {
+        date,
+        current: Math.round(avgCurrent / 1000),
+        suggested: Math.round(avgSuggested / 1000),
+        occupancy: Number(
+          (
+            (day.reduce((sum, s) => sum + s.occupancy, 0) / Math.max(1, day.length))
+          ).toFixed(1),
+        ),
+      };
+    }),
+  };
+}
+
+/**
+ * Nights in the gap this date sits in, or 0 when the date is not an orphan.
+ * An orphan is a short empty stretch bounded by sold nights on both sides.
+ */
+function orphanGapNights(roomTypeId: string, date: ISODate): number {
+  const sold = (d: ISODate) => {
+    const cell = ariCells.find((c) => c.roomTypeId === roomTypeId && c.date === d);
+    return cell ? cell.booked / Math.max(1, cell.allotment) > 0.75 : false;
+  };
+  if (sold(date)) return 0;
+
+  let back = 1;
+  while (back <= 3 && !sold(addDays(date, -back))) back++;
+  if (back > 3) return 0;
+
+  let forward = 1;
+  while (forward <= 3 && !sold(addDays(date, forward))) forward++;
+  if (forward > 3) return 0;
+
+  return back + forward - 1;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Global search                                                             */
+/* -------------------------------------------------------------------------- */
+
+const CHANNEL_LABELS: Record<string, string> = {
+  booking_com: "Booking.com",
+  airbnb: "Airbnb",
+  expedia: "Expedia",
+  agoda: "Agoda",
+  traveloka: "Traveloka",
+  tiket_com: "Tiket.com",
+  direct: "Direct",
+  walk_in: "Walk-in",
+};
+
+/**
+ * Words that carry no signal in a query like "how do I block a room".
+ * Without stripping these, token coverage never reaches a useful threshold
+ * and natural-language questions score zero.
+ */
+const STOPWORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "can", "do", "does", "for", "from",
+  "how", "i", "in", "is", "it", "me", "my", "of", "on", "or", "our", "set",
+  "should", "the", "to", "up", "want", "was", "we", "what", "when", "where",
+  "which", "why", "with", "you", "your",
+]);
+
+function meaningfulTokens(needle: string): string[] {
+  const tokens = needle
+    .split(/[^a-z0-9.-]+/i)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const kept = tokens.filter((token) => token.length > 1 && !STOPWORDS.has(token));
+  // If the query was nothing but stopwords, fall back to what was typed.
+  return kept.length > 0 ? kept : tokens;
+}
+
+/**
+ * Scores a candidate against the query.
+ *
+ * Exact and prefix matches outrank everything, so a full reference lands its
+ * reservation first. Below that, score is driven by how much of the query's
+ * meaningful vocabulary the candidate covers, which is what lets a typed
+ * question find the article that answers it.
+ */
+function best(
+  needle: string,
+  tokens: string[],
+  ...fields: (string | null | undefined)[]
+): number {
+  const values = fields.filter(Boolean).map((field) => field!.toLowerCase());
+  if (values.length === 0) return 0;
+
+  let phraseScore = 0;
+  for (const value of values) {
+    if (value === needle) phraseScore = Math.max(phraseScore, 100);
+    else if (value.startsWith(needle)) phraseScore = Math.max(phraseScore, 72);
+    else {
+      const index = value.indexOf(needle);
+      if (index === 0) phraseScore = Math.max(phraseScore, 62);
+      else if (index > 0) phraseScore = Math.max(phraseScore, 44 - Math.min(20, index));
+    }
+  }
+
+  const haystack = values.join(" ");
+  const matched = tokens.filter((token) => haystack.includes(token)).length;
+  const coverage = tokens.length === 0 ? 0 : matched / tokens.length;
+  // Require more than a single incidental word before a multi-word query
+  // counts as a hit, otherwise "room" alone drags in everything.
+  const coverageScore =
+    coverage === 0 || (tokens.length > 2 && matched < 2) ? 0 : Math.round(coverage * 48);
+
+  return Math.max(phraseScore, coverageScore);
+}
+
+/**
+ * One index over everything a user might type: reservations, guests, rooms,
+ * rate plans, channels, pages, help articles and quick actions.
+ *
+ * It runs on the server so it covers the whole ledger rather than only what
+ * the current page happens to have loaded into the browser.
+ */
+export function searchEverything(rawQuery: string, limit = 24): SearchResult[] {
+  const needle = rawQuery.trim().toLowerCase();
+  if (needle.length < 1) return [];
+  const tokens = meaningfulTokens(needle);
+
+  const results: SearchResult[] = [];
+
+  for (const item of allNavItems) {
+    const score = best(needle, tokens, item.title, item.description);
+    if (score > 0) {
+      results.push({
+        id: `page:${item.href}`,
+        kind: "page",
+        title: item.title,
+        subtitle: item.description,
+        href: item.href,
+        score: score + 12,
+      });
+    }
+  }
+
+  for (const article of helpArticles) {
+    const score = best(
+      needle,
+      tokens,
+      article.title,
+      article.summary,
+      article.keywords.join(" "),
+    );
+    if (score > 0) {
+      results.push({
+        id: `article:${article.slug}`,
+        kind: "article",
+        title: article.title,
+        subtitle: `${helpCategoryLabels[article.category]} · ${article.minutes} min read`,
+        href: `/help/${article.slug}`,
+        score: score + 6,
+        badge: "Tutorial",
+      });
+    }
+  }
+
+  for (const ota of otaCatalog) {
+    const score = best(needle, tokens, ota.name, `connect ${ota.name}`, ota.summary);
+    if (score > 0) {
+      results.push({
+        id: `ota:${ota.slug}`,
+        kind: "article",
+        title: `Connect ${ota.name}`,
+        subtitle: ota.summary.slice(0, 90),
+        href: `/channels/connect/${ota.slug}`,
+        score: score + 4,
+        badge: "Setup guide",
+      });
+    }
+  }
+
+  for (const reservation of reservations) {
+    const guest = getGuest(reservation.guestId);
+    const score = best(needle, tokens, reservation.reference,
+      reservation.channelReference,
+      guest?.name,
+      guest?.email,
+    );
+    if (score > 0) {
+      results.push({
+        id: `res:${reservation.id}`,
+        kind: "reservation",
+        title: `${reservation.reference} · ${guest?.name ?? "Unknown guest"}`,
+        subtitle: `${CHANNEL_LABELS[reservation.channel]} · ${reservation.checkIn} → ${reservation.checkOut}`,
+        href: `/reservations/${reservation.id}`,
+        score: score + 8,
+        badge: reservation.status.replace(/_/g, " "),
+      });
+    }
+  }
+
+  for (const guest of guests) {
+    const score = best(needle, tokens, guest.name, guest.email, guest.phone);
+    if (score > 0) {
+      results.push({
+        id: `guest:${guest.id}`,
+        kind: "guest",
+        title: guest.name,
+        subtitle: `${guest.email} · ${guest.stays} stay${guest.stays === 1 ? "" : "s"}`,
+        href: "/guests",
+        score,
+      });
+    }
+  }
+
+  for (const room of rooms) {
+    const score = best(needle, tokens, `room ${room.number}`, room.number);
+    if (score > 0) {
+      results.push({
+        id: `room:${room.id}`,
+        kind: "room",
+        title: `Room ${room.number}`,
+        subtitle: `${getRoomType(room.roomTypeId)?.title ?? "—"} · floor ${room.floor}`,
+        href: "/planner",
+        score,
+      });
+    }
+  }
+
+  for (const plan of ratePlans) {
+    const score = best(needle, tokens, plan.title, plan.code);
+    if (score > 0) {
+      results.push({
+        id: `plan:${plan.id}`,
+        kind: "rate_plan",
+        title: `${plan.title} (${plan.code})`,
+        subtitle: getRoomType(plan.roomTypeId)?.title ?? "—",
+        href: "/inventory",
+        score,
+      });
+    }
+  }
+
+  for (const channel of channelConnections) {
+    const score = best(needle, tokens, channel.name, channel.code);
+    if (score > 0) {
+      results.push({
+        id: `channel:${channel.code}`,
+        kind: "channel",
+        title: channel.name,
+        subtitle: `${channel.state} · ${channel.mappedRoomTypes}/${channel.totalRoomTypes} mapped`,
+        href: "/channels",
+        score,
+      });
+    }
+  }
+
+  const actions = [
+    { title: "Create a reservation", subtitle: "New direct or walk-in booking", href: "/reservations/new", terms: "new booking create reservation add" },
+    { title: "Block a room", subtitle: "Take a room out of sale for maintenance", href: "/planner?block=1", terms: "block room maintenance out of order repair" },
+    { title: "Add a channel", subtitle: "Connect an OTA through Channex", href: "/channels?add=1", terms: "add channel connect ota new integration" },
+    { title: "Add a room type", subtitle: "Create sellable inventory", href: "/inventory?add=room-type", terms: "add room type inventory create new room" },
+    { title: "Add a rate plan", subtitle: "Create a new price product", href: "/inventory?add=rate-plan", terms: "add rate plan price product create" },
+    { title: "Invite a user", subtitle: "Add a teammate and scope properties", href: "/users?invite=1", terms: "invite user add team member staff access" },
+    { title: "Pay an invoice", subtitle: "Settle the outstanding balance", href: "/billing", terms: "pay invoice billing payment subscription card" },
+    { title: "Push rates to channels", subtitle: "Sync the ARI window through Channex", href: "/calendar", terms: "sync push rates availability channex update" },
+  ];
+  for (const action of actions) {
+    const score = best(needle, tokens, action.title, action.terms);
+    if (score > 0) {
+      results.push({
+        id: `action:${action.href}`,
+        kind: "action",
+        title: action.title,
+        subtitle: action.subtitle,
+        href: action.href,
+        score: score + 10,
+        badge: "Action",
+      });
+    }
+  }
+
+  return results.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title)).slice(0, limit);
 }

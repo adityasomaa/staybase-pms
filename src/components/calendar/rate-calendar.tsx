@@ -246,11 +246,14 @@ export function RateCalendar({
 
       <Card className="overflow-hidden p-0">
         <CardContent className="p-0">
-          <div className="scrollbar-thin overflow-x-auto">
+          {/* The scroller owns its own height so the sticky header below
+              anchors inside it. Left at auto height, `sticky top-0` resolves
+              against the page and slides under the app header instead. */}
+          <div className="scrollbar-thin max-h-[64vh] overflow-auto">
             <div style={{ minWidth: `calc(14rem + ${visibleDates.length} * ${DAY_WIDTH})` }}>
               {/* Date header */}
-              <div className="bg-muted/50 sticky top-0 z-20 flex border-b">
-                <div className="bg-muted/50 sticky left-0 z-10 w-56 shrink-0 border-r px-3 py-2">
+              <div className="bg-muted/60 sticky top-0 z-20 flex border-b backdrop-blur-sm">
+                <div className="bg-muted/60 sticky left-0 z-30 w-56 shrink-0 border-r px-3 py-2">
                   <p className="text-xs font-medium">Room type / rate plan</p>
                 </div>
                 {visibleDates.map((date) => (
@@ -274,7 +277,7 @@ export function RateCalendar({
                 <div key={row.roomTypeId} className="border-b last:border-b-0">
                   {/* Availability line */}
                   <div className="bg-background flex">
-                    <div className="bg-background sticky left-0 z-10 flex w-56 shrink-0 items-center gap-2 border-r px-3 py-2">
+                    <div className="bg-background sticky left-0 z-10 flex w-56 shrink-0 items-center gap-2 border-r px-3 py-2 transition-colors">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{row.roomTypeTitle}</p>
                         <p className="text-muted-foreground text-xs">
@@ -325,8 +328,11 @@ export function RateCalendar({
 
                   {/* One line per rate plan */}
                   {row.plans.map((plan) => (
-                    <div key={plan.ratePlanId} className="hover:bg-muted/30 flex">
-                      <div className="bg-background sticky left-0 z-10 flex w-56 shrink-0 items-center gap-1.5 border-r py-1.5 pr-2 pl-6">
+                    <div key={plan.ratePlanId} className="group/plan hover:bg-muted/30 flex">
+                      {/* The sticky cell paints its own background, so it has
+                          to opt into the row hover or the row highlights only
+                          on the scrolling half. */}
+                      <div className="bg-background group-hover/plan:bg-muted/30 sticky left-0 z-10 flex w-56 shrink-0 items-center gap-1.5 border-r py-1.5 pr-2 pl-6 transition-colors">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-xs font-medium">{plan.title}</p>
                           <p className="text-muted-foreground text-[10px]">

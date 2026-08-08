@@ -86,22 +86,31 @@ export function HousekeepingBoard({ rooms }: { rooms: HousekeepingRoom[] }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <ToggleGroup
-          type="single"
-          size="sm"
-          variant="outline"
-          value={filter}
-          onValueChange={(value) => setFilter((value || "all") as typeof filter)}
-        >
-          <ToggleGroupItem value="all" className="px-2.5 text-xs">
-            All ({state.length})
-          </ToggleGroupItem>
-          {counts.map(({ status, count }) => (
-            <ToggleGroupItem key={status} value={status} className="px-2.5 text-xs">
-              {statusLabels[status]} ({count})
+        {/* Five status chips do not fit a 390px viewport. Scrolling the chip
+            row keeps every filter reachable without wrapping the group, which
+            would break its shared border radii. */}
+        <div className="scrollbar-thin -mx-1 max-w-full overflow-x-auto px-1 py-0.5">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            variant="outline"
+            value={filter}
+            onValueChange={(value) => setFilter((value || "all") as typeof filter)}
+          >
+            <ToggleGroupItem value="all" className="px-2.5 text-xs whitespace-nowrap">
+              All ({state.length})
             </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+            {counts.map(({ status, count }) => (
+              <ToggleGroupItem
+                key={status}
+                value={status}
+                className="px-2.5 text-xs whitespace-nowrap"
+              >
+                {statusLabels[status]} ({count})
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
 
         <Select value={attendant} onValueChange={setAttendant}>
           <SelectTrigger size="sm" className="ml-auto w-44">

@@ -152,11 +152,17 @@ export function NewBookingForm({
                 <SelectContent>
                   {roomType?.plans.map((plan) => (
                     <SelectItem key={plan.ratePlanId} value={plan.ratePlanId}>
-                      {plan.title} · {formatMoney(plan.rate)}
+                      {plan.title}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {/* The rate lives under the control rather than inside the
+                  option: a plan name plus a formatted IDR amount does not fit
+                  the trigger at tablet widths and was being clipped. */}
+              <p className="text-muted-foreground text-xs">
+                {ratePlan ? `${formatMoney(ratePlan.rate)} per night` : "No plan available"}
+              </p>
             </Field>
 
             <Field label="Check-in" htmlFor="checkIn">

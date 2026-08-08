@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CircleCheck, CircleX, Copy, ExternalLink, KeyRound, Webhook } from "lucide-react";
+import { CircleCheck, CircleX, ExternalLink, KeyRound, Webhook } from "lucide-react";
 
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -90,19 +89,14 @@ export default function SettingsPage() {
                 />
                 <StatusRow label="Database" ok={dbReady} okLabel="Connected" offLabel="Demo data" />
                 <Separator />
-                <div className="space-y-1.5">
-                  <Label htmlFor="baseUrl">API base URL</Label>
-                  <Input id="baseUrl" readOnly value={baseUrl} className="tabular" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="propertyId">Channex property ID</Label>
-                  <Input
-                    id="propertyId"
-                    readOnly
-                    value={activeProperty.channexId ?? "not registered"}
-                    className="tabular"
-                  />
-                </div>
+                {/* Read-only identifiers are rendered as wrapping code rather
+                    than inputs — a UUID or a full URL is wider than the field
+                    and was being clipped with no way to scroll it. */}
+                <ReadOnlyValue label="API base URL" value={baseUrl} />
+                <ReadOnlyValue
+                  label="Channex property ID"
+                  value={activeProperty.channexId ?? "not registered"}
+                />
               </CardContent>
               <CardFooter className="gap-2">
                 <Button variant="outline" size="sm" asChild>
@@ -126,20 +120,10 @@ export default function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="callback">Callback URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="callback"
-                      readOnly
-                      value="https://staybase-pms.vercel.app/api/channex/webhook"
-                      className="tabular"
-                    />
-                    <Button variant="outline" size="icon" aria-label="Copy callback URL">
-                      <Copy className="size-4" />
-                    </Button>
-                  </div>
-                </div>
+                <ReadOnlyValue
+                  label="Callback URL"
+                  value="https://staybase-pms.vercel.app/api/channex/webhook"
+                />
                 <div className="space-y-1.5">
                   <Label>Event mask</Label>
                   <div className="flex flex-wrap gap-1.5">
@@ -248,6 +232,17 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </>
+  );
+}
+
+function ReadOnlyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-sm font-medium">{label}</p>
+      <code className="bg-muted/60 tabular block rounded-md border px-2.5 py-1.5 text-xs break-all">
+        {value}
+      </code>
+    </div>
   );
 }
 

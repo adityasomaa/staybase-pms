@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { BedDouble, CircleAlert, Layers, Tags } from "lucide-react";
 
+import { InventoryActions } from "@/components/inventory/inventory-actions";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -35,7 +35,10 @@ import {
 
 export const metadata: Metadata = { title: "Inventory" };
 
-export default function InventoryPage() {
+export default async function InventoryPage(props: {
+  searchParams: Promise<{ add?: string }>;
+}) {
+  const searchParams = await props.searchParams;
   const propertyRoomTypes = roomTypes.filter((rt) => rt.propertyId === activeProperty.id);
   const performance = getRevenueByRoomType();
   const unmapped =
@@ -48,12 +51,26 @@ export default function InventoryPage() {
         title="Inventory"
         description="Room types, physical rooms and rate plans. Everything defined here is what Channex maps onto each channel's own product catalogue."
         actions={
-          <>
-            <Button variant="outline" size="sm">
-              Add rate plan
-            </Button>
-            <Button size="sm">Add room type</Button>
-          </>
+          <InventoryActions
+            initial={
+              searchParams.add === "room-type"
+                ? "room-type"
+                : searchParams.add === "rate-plan"
+                  ? "rate-plan"
+                  : searchParams.add === "room"
+                    ? "room"
+                    : null
+            }
+            roomTypes={propertyRoomTypes.map((rt) => ({
+              id: rt.id,
+              title: rt.title,
+              code: rt.code,
+              defaultRate: rt.defaultRate,
+              ratePlans: ratePlans
+                .filter((rp) => rp.roomTypeId === rt.id && rp.mode === "manual")
+                .map((rp) => ({ id: rp.id, title: rp.title, code: rp.code })),
+            }))}
+          />
         }
       />
 

@@ -10,10 +10,15 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import Link from "next/link";
+
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { AddChannelDialog } from "@/components/channels/add-channel-dialog";
 import { SyncNowButton } from "@/components/channels/sync-now-button";
+import { otaCatalog, otaCategoryLabels } from "@/lib/ota/catalog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
@@ -60,7 +65,10 @@ const outcomeIcon: Record<SyncOutcome, React.ReactNode> = {
   error: <CircleAlert className="text-destructive size-3.5" />,
 };
 
-export default function ChannelsPage() {
+export default async function ChannelsPage(props: {
+  searchParams: Promise<{ add?: string }>;
+}) {
+  const searchParams = await props.searchParams;
   const connected = channelConnections.filter((c) => c.state === "connected");
   const errors = channelConnections.filter((c) => c.state === "error");
   const revenue30d = channelConnections.reduce((sum, c) => sum + c.revenue30d, 0);
@@ -76,8 +84,30 @@ export default function ChannelsPage() {
     <>
       <PageHeader
         title="Channels"
-        description={`Connectivity is provided by Channex. STAYBASE pushes availability, rates and restrictions in one batch, and receives bookings back over a signed webhook.`}
-        actions={<SyncNowButton />}
+        description="Connectivity is provided by Channex. STAYBASE pushes availability, rates and restrictions in one batch, and receives bookings back over a signed webhook."
+        actions={
+          <>
+            <SyncNowButton />
+            <AddChannelDialog
+              openOnMount={searchParams.add === "1"}
+              options={otaCatalog.map((ota) => ({
+                slug: ota.slug,
+                name: ota.name,
+                category: ota.category,
+                categoryLabel: otaCategoryLabels[ota.category],
+                summary: ota.summary,
+                regions: ota.regions,
+                commissionRange: ota.commissionRange,
+                averageSetupDays: ota.averageSetupDays,
+                connected: channelConnections.some(
+                  (channel) =>
+                    channel.name.toLowerCase() === ota.name.toLowerCase() &&
+                    channel.state === "connected",
+                ),
+              }))}
+            />
+          </>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -179,6 +209,19 @@ export default function ChannelsPage() {
                       : "Waiting for the first handshake"}
                   </p>
                 )}
+
+                {(() => {
+                  const guide = otaCatalog.find(
+                    (ota) => ota.name.toLowerCase() === channel.name.toLowerCase(),
+                  );
+                  return guide ? (
+                    <Button variant="outline" size="sm" className="w-full" asChild>
+                      <Link href={`/channels/connect/${guide.slug}`}>
+                        {channel.state === "connected" ? "Mapping & setup guide" : "Finish setup"}
+                      </Link>
+                    </Button>
+                  ) : null;
+                })()}
               </CardContent>
             </Card>
           );

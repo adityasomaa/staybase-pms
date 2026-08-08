@@ -44,6 +44,8 @@ export interface SidebarBadges {
   arrivals: number;
   syncErrors: number;
   dirtyRooms: number;
+  blocks: number;
+  unpaidInvoices: number;
 }
 
 export function AppSidebar({
@@ -142,7 +144,10 @@ export function AppSidebar({
                           {count > 0 ? (
                             <Badge
                               variant={
-                                item.badgeKey === "syncErrors" ? "destructive" : "secondary"
+                                item.badgeKey === "syncErrors" ||
+                                item.badgeKey === "unpaidInvoices"
+                                  ? "destructive"
+                                  : "secondary"
                               }
                               className={cn(
                                 "ml-auto h-5 min-w-5 justify-center px-1 text-[11px] tabular",

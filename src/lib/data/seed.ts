@@ -34,16 +34,16 @@ function mulberry32(seed: number) {
 }
 
 const rand = mulberry32(20260808);
-const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)];
+export const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)];
 const between = (min: number, max: number) => min + rand() * (max - min);
-const intBetween = (min: number, max: number) => Math.floor(between(min, max + 1));
+export const intBetween = (min: number, max: number) => Math.floor(between(min, max + 1));
 
 /** Anchor instant for the whole dataset — resolved once, on the server. */
 const NOW = new Date();
 export const TODAY: ISODate = toISODate(NOW);
 
 /** Minutes before NOW, as an ISO timestamp. Keeps every "last sync" in the past. */
-function minutesAgo(minutes: number): string {
+export function minutesAgo(minutes: number): string {
   return new Date(NOW.getTime() - minutes * 60_000).toISOString();
 }
 
