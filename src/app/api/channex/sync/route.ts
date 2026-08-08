@@ -15,6 +15,8 @@ const bodySchema = z.object({
   scope: z.enum(["ari", "availability", "restrictions"]).default("ari"),
 });
 
+type SyncInput = z.infer<typeof bodySchema>;
+
 /**
  * Pushes the ARI window to Channex, which fans it out to every mapped channel.
  * Called by the "Sync now" action in the rate calendar and by the scheduled
@@ -28,8 +30,29 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  return runSync(parsed.data);
+}
 
-  const { from = TODAY, days, scope } = parsed.data;
+/**
+ * Nightly reconciliation, wired to the Vercel cron in vercel.json.
+ *
+ * Channels drift: a rejected batch, a channel-side outage or a manual edit in
+ * an extranet all leave the OTA out of step with the PMS. Re-pushing the full
+ * 90 day window once a night makes that self-healing.
+ */
+export async function GET(request: Request) {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const authorization = request.headers.get("authorization");
+    if (authorization !== `Bearer ${secret}`) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+  }
+  return runSync({ from: TODAY, days: 90, scope: "ari" });
+}
+
+async function runSync(input: SyncInput) {
+  const { from = TODAY, days, scope } = input;
   const { rows } = getAriGrid(from, days);
   const cells = rows.flatMap((row) => row.plans.flatMap((plan) => plan.cells));
 

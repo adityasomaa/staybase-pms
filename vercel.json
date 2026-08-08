@@ -4,8 +4,8 @@
   "regions": ["sin1"],
   "crons": [
     {
-      "path": "/api/health",
-      "schedule": "0 * * * *"
+      "path": "/api/channex/sync",
+      "schedule": "0 19 * * *"
     }
   ],
   "headers": [

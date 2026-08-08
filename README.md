@@ -68,6 +68,11 @@ Everything lives under `src/lib/channex/` and `src/app/api/channex/`.
 - Without an API key the route returns `mode: "dry-run"` with the exact batch
   counts instead of failing.
 
+`GET /api/channex/sync` is the same push over a 90-day window, wired to a
+nightly Vercel cron. Channels drift — a rejected batch, a channel-side outage or
+a manual edit in an extranet all leave an OTA out of step — so re-pushing the
+full window once a night makes that self-healing. Protect it with `CRON_SECRET`.
+
 ### Inbound — booking webhook
 
 `POST /api/channex/webhook` handles `booking`, `booking_new`,
@@ -165,3 +170,4 @@ src/
 | `CHANNEX_WEBHOOK_SECRET` | recommended | HMAC verification for inbound webhooks |
 | `CHANNEX_TIMEOUT_MS` | no | Request timeout, default 15000 |
 | `DATABASE_URL` | no | Postgres; omit to use the demo dataset |
+| `CRON_SECRET` | recommended | Bearer token guarding the nightly resync endpoint |
